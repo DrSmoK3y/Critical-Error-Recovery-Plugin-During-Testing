@@ -1,377 +1,410 @@
 <?php
 /**
  * Plugin Name: Emergency Plugin Manager
- * Plugin URI:  https://github.com/DrSmoK3y
- * Description: Emergency plugin deactivation via secret URL - works even when WordPress crashes, ⚠ This plugin is only for test sites, don't use it on live sites.
+ * Plugin URI:  https://github.com/DrSmoK3y/
+ * Description: Emergency plugin deactivation via secret URL - works even when WordPress crashes. ⚠ This plugin is only for test sites, don't use it on live sites.
  * Version:     1.0.0
  * Author:      DrSmoK3y
  * License:     GPL2
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-    // Allow direct access ONLY for emergency mode
-    define('ABSPATH', dirname(__FILE__) . '/../../');
-    define('EMERGENCY_DIRECT_ACCESS', true);
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+define( 'EPM_FILE',    __FILE__ );
+define( 'EPM_OPT',     'epm_config' );
+
+// ─────────────────────────────────────────────────────────────
+//  EARLY INTERCEPT — URL open hone par deactivate (init se pehle)
+// ─────────────────────────────────────────────────────────────
+add_action( 'muplugins_loaded', 'epm_intercept', 1 );
+add_action( 'plugins_loaded',   'epm_intercept', 1 );
+
+function epm_intercept() {
+    static $ran = false;
+    if ( $ran ) return;
+    $ran = true;
+
+    if ( ! isset( $_GET['epm'] ) ) return;
+
+    $cfg = get_option( EPM_OPT, [] );
+    if ( empty( $cfg['secret'] ) ) return;
+    if ( $_GET['epm'] !== $cfg['secret'] ) {
+        epm_die( '❌ Invalid key.' );
+    }
+
+    // Deactivate the stored plugins
+    $to_deact = $cfg['selected_plugins'] ?? [];
+
+    if ( empty( $to_deact ) ) {
+        epm_die( '⚠️ Koi plugin selected nahi. Pehle backend se plugins choose karein.' );
+    }
+
+    $active  = get_option( 'active_plugins', [] );
+    $removed = [];
+
+    foreach ( $to_deact as $p ) {
+        if ( in_array( $p, $active ) ) {
+            $removed[] = $p;
+        }
+    }
+
+    $active = array_values( array_diff( $active, $to_deact ) );
+    update_option( 'active_plugins', $active );
+
+    epm_success_screen( $removed, $to_deact );
+    exit;
 }
 
-// ─────────────────────────────────────────────
-//  SETTINGS
-// ─────────────────────────────────────────────
-define('EPM_SECRET_KEY',   'change-this-secret-key-123');  // <<< CHANGE THIS!
-define('EPM_OPTION_KEY',   'epm_settings');
-define('EPM_VERSION',      '1.0.0');
+// ─────────────────────────────────────────────────────────────
+//  SUCCESS SCREEN
+// ─────────────────────────────────────────────────────────────
+function epm_success_screen( $removed, $attempted ) {
+    $not_found = array_diff( $attempted, $removed );
+    ?>
+    <!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>✅ Plugins Deactivated</title>
+    <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         background:#0f0f1a;color:#e2e8f0;min-height:100vh;
+         display:flex;align-items:center;justify-content:center;padding:20px;}
+    .box{background:#1a1a2e;border:1px solid #2d2d44;border-radius:16px;
+         padding:36px;max-width:560px;width:100%;text-align:center;}
+    .icon{font-size:56px;margin-bottom:16px;}
+    h1{font-size:22px;font-weight:700;color:#4ade80;margin-bottom:8px;}
+    .sub{font-size:14px;color:#64748b;margin-bottom:24px;}
+    .list{background:#0f0f1a;border-radius:10px;padding:16px;text-align:left;margin-bottom:20px;}
+    .list-item{padding:8px 0;border-bottom:1px solid #1e1e30;font-size:13px;display:flex;align-items:center;gap:10px;}
+    .list-item:last-child{border-bottom:none;}
+    .dot{width:8px;height:8px;border-radius:50%;background:#4ade80;flex-shrink:0;}
+    .dot.warn{background:#fbbf24;}
+    .warn-text{color:#fbbf24;font-size:12px;margin-top:12px;}
+    .admin-btn{display:inline-block;margin-top:20px;background:#7c3aed;color:#fff;
+               padding:12px 28px;border-radius:8px;text-decoration:none;
+               font-weight:600;font-size:14px;}
+    </style>
+    </head>
+    <body>
+    <div class="box">
+        <div class="icon">✅</div>
+        <h1><?php echo count($removed); ?> Plugin(s) Deactivate Ho Gaye!</h1>
+        <p class="sub">Aap ab WP Admin mein ja kar issue fix kar sakte hain.</p>
 
-// ─────────────────────────────────────────────
-//  HOOK: Admin Menu
-// ─────────────────────────────────────────────
-add_action('admin_menu', function() {
+        <?php if( !empty($removed) ): ?>
+        <div class="list">
+            <?php foreach($removed as $p): ?>
+            <div class="list-item"><div class="dot"></div><?php echo esc_html($p); ?></div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+        <?php if( !empty($not_found) ): ?>
+        <p class="warn-text">⚠️ Yeh plugins pehle se inactive thay:</p>
+        <div class="list">
+            <?php foreach($not_found as $p): ?>
+            <div class="list-item"><div class="dot warn"></div><?php echo esc_html($p); ?></div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+        <a class="admin-btn" href="<?php echo esc_url( admin_url('plugins.php') ); ?>">
+            → WP Admin Plugins
+        </a>
+    </div>
+    </body></html>
+    <?php
+}
+
+// ─────────────────────────────────────────────────────────────
+//  ERROR SCREEN
+// ─────────────────────────────────────────────────────────────
+function epm_die( $msg ) {
+    ?>
+    <!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>EPM Error</title>
+    <style>
+    body{font-family:sans-serif;background:#0f0f1a;color:#e2e8f0;display:flex;
+         align-items:center;justify-content:center;min-height:100vh;}
+    .box{background:#1a1a2e;border:1px solid #7f1d1d;border-radius:12px;padding:32px;
+         max-width:480px;text-align:center;}
+    h2{color:#f87171;margin-bottom:10px;}p{color:#64748b;font-size:14px;}
+    </style></head><body>
+    <div class="box"><h2>🚨 Emergency Plugin Manager</h2>
+    <p><?php echo esc_html($msg); ?></p></div>
+    </body></html>
+    <?php
+    exit;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  ADMIN MENU
+// ─────────────────────────────────────────────────────────────
+add_action( 'admin_menu', function() {
     add_management_page(
         'Emergency Plugin Manager',
-        'Emergency Plugin Manager',
+        '🚨 Emergency Manager',
         'manage_options',
-        'emergency-plugin-manager',
+        'epm-settings',
         'epm_admin_page'
     );
 });
 
-// ─────────────────────────────────────────────
-//  HOOK: Handle emergency URL (runs very early)
-// ─────────────────────────────────────────────
-add_action('init', 'epm_handle_emergency_request', 1);
+// ─────────────────────────────────────────────────────────────
+//  SAVE SETTINGS
+// ─────────────────────────────────────────────────────────────
+add_action( 'admin_post_epm_save', function() {
+    if ( ! current_user_can('manage_options') ) wp_die('No access');
+    check_admin_referer('epm_save');
 
-function epm_handle_emergency_request() {
-    if ( ! isset($_GET['epm_emergency']) ) return;
-    if ( $_GET['epm_emergency'] !== EPM_SECRET_KEY ) {
-        wp_die('<h2>❌ Invalid emergency key.</h2>', 'Access Denied', ['response' => 403]);
+    $key     = sanitize_text_field( $_POST['secret'] ?? '' );
+    $plugins = array_map( 'sanitize_text_field', $_POST['selected_plugins'] ?? [] );
+
+    if ( empty($key) ) {
+        wp_redirect( admin_url('tools.php?page=epm-settings&err=nokey') );
+        exit;
+    }
+    if ( empty($plugins) ) {
+        wp_redirect( admin_url('tools.php?page=epm-settings&err=noplugins') );
+        exit;
     }
 
-    // Action handling
-    if ( isset($_POST['epm_action']) && check_admin_referer('epm_emergency_action') ) {
-        $action  = sanitize_text_field($_POST['epm_action']);
-        $plugins = isset($_POST['plugins']) ? (array) $_POST['plugins'] : [];
-        $plugins = array_map('sanitize_text_field', $plugins);
+    update_option( EPM_OPT, [
+        'secret'           => $key,
+        'selected_plugins' => $plugins,
+    ]);
 
-        $active = get_option('active_plugins', []);
-
-        if ($action === 'deactivate' && !empty($plugins)) {
-            $active = array_diff($active, $plugins);
-            update_option('active_plugins', array_values($active));
-            epm_show_emergency_ui('✅ Selected plugins deactivated successfully!', 'success');
-            return;
-        }
-        if ($action === 'deactivate_all') {
-            update_option('active_plugins', []);
-            epm_show_emergency_ui('✅ All plugins deactivated!', 'success');
-            return;
-        }
-        if ($action === 'activate' && !empty($plugins)) {
-            foreach ($plugins as $plugin) {
-                if (!in_array($plugin, $active)) {
-                    $active[] = $plugin;
-                }
-            }
-            update_option('active_plugins', array_values($active));
-            epm_show_emergency_ui('✅ Selected plugins activated!', 'success');
-            return;
-        }
-    }
-
-    epm_show_emergency_ui();
+    wp_redirect( admin_url('tools.php?page=epm-settings&saved=1') );
     exit;
-}
+});
 
-// ─────────────────────────────────────────────
-//  EMERGENCY UI (standalone page)
-// ─────────────────────────────────────────────
-function epm_show_emergency_ui($message = '', $msg_type = 'info') {
-    $active_plugins  = get_option('active_plugins', []);
-    $all_plugins     = epm_get_all_plugins();
-    $inactive        = array_diff(array_keys($all_plugins), $active_plugins);
-    $emergency_url   = home_url('/?epm_emergency=' . EPM_SECRET_KEY);
-    $nonce           = wp_create_nonce('epm_emergency_action');
+// ─────────────────────────────────────────────────────────────
+//  ADMIN PAGE
+// ─────────────────────────────────────────────────────────────
+function epm_admin_page() {
+    if ( ! current_user_can('manage_options') ) return;
+
+    if ( ! function_exists('get_plugins') )
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
+    $cfg      = get_option( EPM_OPT, [] );
+    $secret   = $cfg['secret'] ?? '';
+    $selected = $cfg['selected_plugins'] ?? [];
+    $all      = get_plugins();
+    $active   = get_option( 'active_plugins', [] );
+    $this_p   = plugin_basename( EPM_FILE );
+    $saved    = isset( $_GET['saved'] );
+    $err      = $_GET['err'] ?? '';
+    $gen_url  = $secret ? home_url( '/?epm=' . $secret ) : '';
+
+    // Active plugins excluding this plugin
+    $active_others = array_filter( $active, fn($p) => $p !== $this_p );
     ?>
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🚨 Emergency Plugin Manager</title>
-        <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; }
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                   background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px; }
-            .container { max-width: 900px; margin: 0 auto; }
-            .header { background: linear-gradient(135deg, #dc2626, #991b1b);
-                      border-radius: 12px; padding: 24px; margin-bottom: 24px;
-                      display: flex; align-items: center; gap: 16px; }
-            .header-icon { font-size: 48px; }
-            .header h1 { font-size: 24px; font-weight: 700; }
-            .header p  { font-size: 14px; opacity: 0.85; margin-top: 4px; }
-            .alert { padding: 14px 18px; border-radius: 8px; margin-bottom: 20px;
-                     font-weight: 600; display: flex; align-items: center; gap: 10px; }
-            .alert.success { background: #065f46; border: 1px solid #10b981; color: #6ee7b7; }
-            .alert.info    { background: #1e3a5f; border: 1px solid #3b82f6; color: #93c5fd; }
-            .card { background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px;
-                    border: 1px solid #334155; }
-            .card h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px;
-                       display: flex; align-items: center; gap: 8px; }
-            .badge { display: inline-block; padding: 2px 8px; border-radius: 999px;
-                     font-size: 12px; font-weight: 600; margin-left: 8px; }
-            .badge-active   { background: #065f46; color: #6ee7b7; }
-            .badge-inactive { background: #1e3a5f; color: #93c5fd; }
-            .plugin-list { display: flex; flex-direction: column; gap: 8px; }
-            .plugin-item { background: #0f172a; border: 1px solid #334155; border-radius: 8px;
-                           padding: 12px 16px; display: flex; align-items: center; gap: 12px;
-                           transition: border-color 0.2s; cursor: pointer; }
-            .plugin-item:hover { border-color: #64748b; }
-            .plugin-item input[type=checkbox] { width: 18px; height: 18px; accent-color: #ef4444;
-                                                 cursor: pointer; flex-shrink: 0; }
-            .plugin-name { font-weight: 600; font-size: 14px; flex: 1; }
-            .plugin-path { font-size: 11px; color: #64748b; margin-top: 2px; }
-            .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
-            .btn { padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 600;
-                   border: none; cursor: pointer; transition: opacity 0.2s; }
-            .btn:hover { opacity: 0.85; }
-            .btn-danger  { background: #dc2626; color: white; }
-            .btn-danger2 { background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; }
-            .btn-success { background: #059669; color: white; }
-            .btn-select  { background: #334155; color: #cbd5e1; font-size: 12px; padding: 6px 12px; }
-            .separator { border: none; border-top: 1px solid #334155; margin: 20px 0; }
-            .url-box { background: #0f172a; border: 1px solid #334155; border-radius: 8px;
-                       padding: 12px 16px; font-family: monospace; font-size: 12px;
-                       color: #94a3b8; word-break: break-all; }
-            .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
-            .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
-                   font-weight: 600; background: #334155; color: #94a3b8; border: none; }
-            .tab.active { background: #dc2626; color: white; }
-            .tab-content { display: none; }
-            .tab-content.active { display: block; }
-            @media (max-width: 600px) { .btn-row { flex-direction: column; } }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <div class="header-icon">🚨</div>
-                <div>
-                    <h1>Emergency Plugin Manager</h1>
-                    <p>WordPress crash recovery — Manage plugins without cPanel or File Manager</p>
-                </div>
-            </div>
+    <style>
+    #epm-wrap *{box-sizing:border-box;}
+    #epm-wrap{max-width:800px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    #epm-wrap h1{font-size:22px;margin-bottom:20px;display:flex;align-items:center;gap:10px;}
+    .epm-card{background:#1e1e2e;border:1px solid #2d2d44;border-radius:12px;
+              padding:24px;margin-bottom:20px;color:#e2e8f0;}
+    .epm-card h2{font-size:15px;font-weight:700;color:#a78bfa;margin-bottom:6px;}
+    .epm-card p.hint{font-size:12px;color:#64748b;margin-bottom:16px;}
+    .epm-input{width:100%;max-width:380px;padding:10px 14px;border-radius:8px;
+               background:#0f0f1a;border:1px solid #3d3d5c;color:#e2e8f0;
+               font-size:14px;outline:none;}
+    .epm-input:focus{border-color:#7c3aed;}
+    .plugin-grid{display:flex;flex-direction:column;gap:6px;max-height:400px;
+                 overflow-y:auto;padding-right:6px;margin-bottom:16px;}
+    .plugin-grid::-webkit-scrollbar{width:4px;}
+    .plugin-grid::-webkit-scrollbar-thumb{background:#2d2d44;border-radius:4px;}
+    .pi-row{background:#0f0f1a;border:1px solid #2d2d44;border-radius:8px;
+            padding:11px 14px;display:flex;align-items:center;gap:12px;
+            cursor:pointer;transition:border-color .15s;}
+    .pi-row:hover{border-color:#7c3aed;}
+    .pi-row.checked{border-color:#7c3aed;background:#1a0f2e;}
+    .pi-row input{width:17px;height:17px;accent-color:#a78bfa;cursor:pointer;flex-shrink:0;}
+    .pi-name{font-size:13px;font-weight:600;color:#e2e8f0;}
+    .pi-slug{font-size:11px;color:#64748b;margin-top:2px;}
+    .sel-bar{display:flex;gap:8px;margin-bottom:10px;}
+    .btn-sm{padding:6px 12px;border-radius:6px;border:1px solid #3d3d5c;
+            background:#1a1a2e;color:#94a3b8;font-size:12px;cursor:pointer;}
+    .btn-sm:hover{color:#e2e8f0;border-color:#7c3aed;}
+    .btn-save{background:#7c3aed;color:#fff;border:none;padding:11px 28px;
+              border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;}
+    .btn-save:hover{background:#6d28d9;}
+    .alert{padding:12px 16px;border-radius:8px;margin-bottom:16px;
+           font-size:13px;font-weight:600;}
+    .alert.ok {background:#052e16;border:1px solid #166534;color:#4ade80;}
+    .alert.err{background:#2d0000;border:1px solid #7f1d1d;color:#f87171;}
+    .url-box{background:#0f0f1a;border:1px solid #2d2d44;border-radius:8px;
+             padding:14px;font-family:monospace;font-size:13px;color:#fbbf24;
+             word-break:break-all;margin-bottom:10px;}
+    .copy-btn{background:#1a1a2e;border:1px solid #3d3d5c;color:#94a3b8;
+              padding:7px 16px;border-radius:6px;font-size:12px;cursor:pointer;}
+    .copy-btn:hover{color:#e2e8f0;}
+    .badge{display:inline-block;background:#1a0f2e;color:#a78bfa;
+           border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px;}
+    .selected-preview{background:#0f0f1a;border-radius:8px;padding:12px 14px;
+                      font-size:12px;color:#64748b;margin-top:10px;}
+    .selected-preview span{color:#a78bfa;}
+    </style>
 
-            <?php if ($message): ?>
-            <div class="alert <?php echo $msg_type; ?>">
-                <span><?php echo esc_html($message); ?></span>
-            </div>
-            <?php endif; ?>
+    <div id="epm-wrap">
+    <h1>🚨 Emergency Plugin Manager</h1>
 
-            <!-- TABS -->
-            <div class="tab-bar">
-                <button class="tab active" onclick="showTab('deactivate', this)">🔴 Deactivate</button>
-                <button class="tab" onclick="showTab('activate', this)">🟢 Activate</button>
-                <button class="tab" onclick="showTab('info', this)">ℹ️ Info</button>
-            </div>
+    <?php if ($saved): ?>
+    <div class="alert ok">✅ Save ho gaya! Emergency URL ready hai — bookmark kar lein.</div>
+    <?php endif; ?>
+    <?php if ($err === 'nokey'): ?>
+    <div class="alert err">❌ Secret key likhna zarori hai.</div>
+    <?php elseif ($err === 'noplugins'): ?>
+    <div class="alert err">❌ Kam az kam ek plugin select karein.</div>
+    <?php endif; ?>
 
-            <!-- TAB: DEACTIVATE -->
-            <div id="tab-deactivate" class="tab-content active">
-                <div class="card">
-                    <h2>🔴 Active Plugins
-                        <span class="badge badge-active"><?php echo count($active_plugins); ?></span>
-                    </h2>
-                    <?php if (empty($active_plugins)): ?>
-                        <p style="color:#64748b;">No active plugins found.</p>
-                    <?php else: ?>
-                    <form method="POST">
-                        <input type="hidden" name="_wpnonce" value="<?php echo $nonce; ?>">
-                        <input type="hidden" name="epm_action" value="deactivate">
-                        <div style="margin-bottom:10px; display:flex; gap:8px;">
-                            <button type="button" class="btn btn-select" onclick="selectAll('deact-list', true)">✅ Select All</button>
-                            <button type="button" class="btn btn-select" onclick="selectAll('deact-list', false)">☐ Deselect All</button>
-                        </div>
-                        <div class="plugin-list" id="deact-list">
-                        <?php foreach ($active_plugins as $plugin_file):
-                            $info = $all_plugins[$plugin_file] ?? ['name' => $plugin_file];
-                        ?>
-                            <label class="plugin-item">
-                                <input type="checkbox" name="plugins[]" value="<?php echo esc_attr($plugin_file); ?>">
-                                <div>
-                                    <div class="plugin-name"><?php echo esc_html($info['name']); ?></div>
-                                    <div class="plugin-path"><?php echo esc_html($plugin_file); ?></div>
-                                </div>
-                            </label>
-                        <?php endforeach; ?>
-                        </div>
-                        <div class="btn-row">
-                            <button type="submit" class="btn btn-danger">🔴 Deactivate Selected</button>
-                        </div>
-                    </form>
-                    <hr class="separator">
-                    <form method="POST">
-                        <input type="hidden" name="_wpnonce" value="<?php echo $nonce; ?>">
-                        <input type="hidden" name="epm_action" value="deactivate_all">
-                        <button type="submit" class="btn btn-danger2"
-                            onclick="return confirm('Sare active plugins deactivate ho jaenge. Confirm?')">
-                            ⚠️ Deactivate ALL Plugins (Emergency)
-                        </button>
-                    </form>
-                    <?php endif; ?>
-                </div>
-            </div>
+    <form method="POST" action="<?php echo admin_url('admin-post.php'); ?>">
+    <?php wp_nonce_field('epm_save'); ?>
+    <input type="hidden" name="action" value="epm_save">
 
-            <!-- TAB: ACTIVATE -->
-            <div id="tab-activate" class="tab-content">
-                <div class="card">
-                    <h2>🟢 Inactive Plugins
-                        <span class="badge badge-inactive"><?php echo count($inactive); ?></span>
-                    </h2>
-                    <?php if (empty($inactive)): ?>
-                        <p style="color:#64748b;">Koi inactive plugin nahi mili.</p>
-                    <?php else: ?>
-                    <form method="POST">
-                        <input type="hidden" name="_wpnonce" value="<?php echo $nonce; ?>">
-                        <input type="hidden" name="epm_action" value="activate">
-                        <div style="margin-bottom:10px; display:flex; gap:8px;">
-                            <button type="button" class="btn btn-select" onclick="selectAll('act-list', true)">✅ Select All</button>
-                            <button type="button" class="btn btn-select" onclick="selectAll('act-list', false)">☐ Deselect All</button>
-                        </div>
-                        <div class="plugin-list" id="act-list">
-                        <?php foreach ($inactive as $plugin_file):
-                            $info = $all_plugins[$plugin_file] ?? ['name' => $plugin_file];
-                        ?>
-                            <label class="plugin-item">
-                                <input type="checkbox" name="plugins[]" value="<?php echo esc_attr($plugin_file); ?>">
-                                <div>
-                                    <div class="plugin-name"><?php echo esc_html($info['name']); ?></div>
-                                    <div class="plugin-path"><?php echo esc_html($plugin_file); ?></div>
-                                </div>
-                            </label>
-                        <?php endforeach; ?>
-                        </div>
-                        <div class="btn-row">
-                            <button type="submit" class="btn btn-success">🟢 Activate Selected</button>
-                        </div>
-                    </form>
-                    <?php endif; ?>
-                </div>
-            </div>
+    <!-- SECRET KEY -->
+    <div class="epm-card">
+        <h2>🔑 Secret Key</h2>
+        <p class="hint">Apni marzi ki key likhein — letters ya numbers. Koi default nahi.</p>
+        <input type="text" name="secret" class="epm-input"
+               value="<?php echo esc_attr($secret); ?>"
+               placeholder="e.g. ali2024 ya mysite99"
+               autocomplete="off">
+    </div>
 
-            <!-- TAB: INFO -->
-            <div id="tab-info" class="tab-content">
-                <div class="card">
-                    <h2>🔗 Emergency URL</h2>
-                    <p style="font-size:13px; color:#94a3b8; margin-bottom:12px;">
-                        Yeh URL bookmark kar lein ya kisi safe jagah save kar lein. Site crash hone par bhi kaam karega:
-                    </p>
-                    <div class="url-box"><?php echo esc_html($emergency_url); ?></div>
-                    <br>
-                    <p style="font-size:12px; color:#ef4444;">
-                        ⚠️ Yeh URL secret rakhein. Isse koi bhi plugins manage kar sakta hai.
-                    </p>
-                </div>
-                <div class="card">
-                    <h2>📋 Plugin Summary</h2>
-                    <p style="font-size:14px; color:#94a3b8; line-height:1.7;">
-                        Total plugins installed: <strong style="color:#e2e8f0;"><?php echo count($all_plugins); ?></strong><br>
-                        Active: <strong style="color:#6ee7b7;"><?php echo count($active_plugins); ?></strong><br>
-                        Inactive: <strong style="color:#93c5fd;"><?php echo count($inactive); ?></strong>
-                    </p>
-                </div>
-                <div class="card">
-                    <h2>🔑 Secret Key Change Karna</h2>
-                    <p style="font-size:13px; color:#94a3b8; line-height:1.7;">
-                        Plugin file main yeh line change karein:<br>
-                        <code style="background:#0f172a; padding:4px 8px; border-radius:4px; color:#fbbf24;">
-                            define('EPM_SECRET_KEY', 'your-new-secret-key');
-                        </code>
-                    </p>
-                </div>
-            </div>
+    <!-- PLUGIN SELECTION -->
+    <div class="epm-card">
+        <h2>🔴 Plugins Select Karein
+            <span class="badge" id="sel-count">
+                <?php echo count($selected); ?> selected
+            </span>
+        </h2>
+        <p class="hint">
+            Yeh plugins us waqt deactivate honge jab aap emergency URL kholein.
+            Sirf active plugins dikh rahe hain.
+        </p>
 
+        <div class="sel-bar">
+            <button type="button" class="btn-sm" onclick="selAll(true)">✅ Sab Select</button>
+            <button type="button" class="btn-sm" onclick="selAll(false)">☐ Sab Hatao</button>
         </div>
 
-        <script>
-        function showTab(name, btn) {
-            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.getElementById('tab-' + name).classList.add('active');
-            btn.classList.add('active');
-        }
-        function selectAll(listId, checked) {
-            document.querySelectorAll('#' + listId + ' input[type=checkbox]')
-                .forEach(cb => cb.checked = checked);
-        }
-        </script>
-    </body>
-    </html>
-    <?php
-    exit;
-}
+        <div class="plugin-grid" id="pgrid">
+        <?php if (empty($active_others)): ?>
+            <p style="color:#64748b;font-size:13px;">Koi active plugin nahi mila.</p>
+        <?php else: ?>
+            <?php foreach ($active_others as $pfile):
+                $info = $all[$pfile] ?? ['Name' => $pfile, 'Version' => ''];
+                $is_checked = in_array($pfile, $selected);
+            ?>
+            <label class="pi-row <?php echo $is_checked ? 'checked' : ''; ?>"
+                   onclick="updateRow(this)">
+                <input type="checkbox" name="selected_plugins[]"
+                       value="<?php echo esc_attr($pfile); ?>"
+                       <?php checked($is_checked); ?>
+                       onchange="updateCount()">
+                <div>
+                    <div class="pi-name"><?php echo esc_html($info['Name']); ?>
+                        <?php if(!empty($info['Version'])): ?>
+                        <span style="color:#64748b;font-weight:400;font-size:11px;">
+                            v<?php echo esc_html($info['Version']); ?>
+                        </span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="pi-slug"><?php echo esc_html($pfile); ?></div>
+                </div>
+            </label>
+            <?php endforeach; ?>
+        <?php endif; ?>
+        </div>
 
-// ─────────────────────────────────────────────
-//  HELPER: Get all installed plugins
-// ─────────────────────────────────────────────
-function epm_get_all_plugins() {
-    if ( ! function_exists('get_plugins') ) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    }
-    $plugins = get_plugins();
-    $result  = [];
-    foreach ($plugins as $file => $data) {
-        $result[$file] = ['name' => $data['Name'], 'version' => $data['Version']];
-    }
-    return $result;
-}
+        <button type="submit" class="btn-save">💾 Save Karein &amp; URL Banao</button>
+    </div>
 
-// ─────────────────────────────────────────────
-//  ADMIN PAGE (normal WP admin access)
-// ─────────────────────────────────────────────
-function epm_admin_page() {
-    if ( ! current_user_can('manage_options') ) {
-        wp_die('Access denied');
-    }
-    $secret_key  = EPM_SECRET_KEY;
-    $emergency_url = home_url('/?epm_emergency=' . $secret_key);
-    ?>
-    <div class="wrap">
-        <h1>🚨 Emergency Plugin Manager</h1>
-        <div style="background:#1e1e1e; color:#e2e8f0; padding:20px; border-radius:8px; max-width:700px; margin-top:20px;">
-            <h2 style="color:#ef4444; margin-bottom:12px;">Emergency URL</h2>
-            <p style="margin-bottom:10px; color:#94a3b8;">
-                Yeh URL site crash hone par use karein. Bookmark kar lein abhi:
-            </p>
-            <code style="background:#0f172a; display:block; padding:12px; border-radius:6px;
-                         word-break:break-all; color:#fbbf24; font-size:13px;">
-                <?php echo esc_html($emergency_url); ?>
-            </code>
-            <br>
-            <p style="color:#ef4444; font-size:13px;">
-                ⚠️ Secret key change karna na bhulen: plugin file line 12 per <code>EPM_SECRET_KEY</code>
-            </p>
-            <br>
-            <a href="<?php echo esc_url($emergency_url); ?>" target="_blank"
-               style="background:#dc2626; color:white; padding:10px 20px; border-radius:6px;
-                      text-decoration:none; font-weight:600;">
-                🚨 Emergency Panel Kholein
-            </a>
+    </form>
+
+    <!-- GENERATED URL -->
+    <?php if ($gen_url && !empty($selected)): ?>
+    <div class="epm-card">
+        <h2>🔗 Emergency URL</h2>
+        <p class="hint">
+            Yeh URL kholne se <strong style="color:#f87171;"><?php echo count($selected); ?> plugin(s)</strong>
+            automatically deactivate ho jaenge — bina login ke.
+        </p>
+        <div class="url-box" id="epm-url"><?php echo esc_html($gen_url); ?></div>
+        <button class="copy-btn" onclick="copyUrl()">📋 Copy URL</button>
+        <a href="<?php echo esc_url($gen_url); ?>" target="_blank"
+           style="margin-left:8px;background:#7f1d1d;color:#fca5a5;border:1px solid #dc2626;
+                  padding:7px 16px;border-radius:6px;font-size:12px;text-decoration:none;
+                  font-weight:600;">
+            🧪 Test Karein →
+        </a>
+
+        <div class="selected-preview">
+            <strong style="color:#e2e8f0;">Deactivate honge:</strong><br>
+            <?php foreach($selected as $p):
+                $n = $all[$p]['Name'] ?? $p;
+            ?>
+            <span>• <?php echo esc_html($n); ?></span><br>
+            <?php endforeach; ?>
         </div>
     </div>
+    <?php elseif ($secret && empty($selected)): ?>
+    <div class="epm-card">
+        <p style="color:#64748b;font-size:13px;">
+            ⚠️ Koi plugin selected nahi — URL generate nahi hoga.
+        </p>
+    </div>
+    <?php endif; ?>
+
+    </div><!-- /epm-wrap -->
+
+    <script>
+    function updateRow(label) {
+        setTimeout(() => {
+            var cb = label.querySelector('input[type=checkbox]');
+            label.classList.toggle('checked', cb.checked);
+            updateCount();
+        }, 0);
+    }
+    function updateCount() {
+        var n = document.querySelectorAll('#pgrid input:checked').length;
+        document.getElementById('sel-count').textContent = n + ' selected';
+    }
+    function selAll(chk) {
+        document.querySelectorAll('#pgrid input[type=checkbox]').forEach(function(cb) {
+            cb.checked = chk;
+            cb.closest('.pi-row').classList.toggle('checked', chk);
+        });
+        updateCount();
+    }
+    function copyUrl() {
+        var txt = document.getElementById('epm-url').textContent.trim();
+        navigator.clipboard.writeText(txt).then(function() {
+            var btn = event.target;
+            btn.textContent = '✅ Copied!';
+            setTimeout(function(){ btn.textContent = '📋 Copy URL'; }, 2000);
+        });
+    }
+    </script>
     <?php
 }
 
-// ─────────────────────────────────────────────
-//  ACTIVATION: Show notice with emergency URL
-// ─────────────────────────────────────────────
-register_activation_hook(__FILE__, function() {
-    add_option('epm_activation_notice', true);
+// ─────────────────────────────────────────────────────────────
+//  ACTIVATION NOTICE
+// ─────────────────────────────────────────────────────────────
+register_activation_hook( __FILE__, function() {
+    add_option('epm_fresh', 1);
 });
 
 add_action('admin_notices', function() {
-    if ( get_option('epm_activation_notice') ) {
-        delete_option('epm_activation_notice');
-        $url = home_url('/?epm_emergency=' . EPM_SECRET_KEY);
-        echo '<div class="notice notice-warning is-dismissible">
-            <p><strong>🚨 Emergency Plugin Manager:</strong> Apna emergency URL save kar lein: 
-            <code>' . esc_html($url) . '</code></p>
-        </div>';
-    }
+    if (!get_option('epm_fresh')) return;
+    delete_option('epm_fresh');
+    $url = admin_url('tools.php?page=epm-settings');
+    echo '<div class="notice notice-warning is-dismissible"><p>
+        🚨 <strong>Emergency Plugin Manager:</strong>
+        <a href="'.esc_url($url).'"><strong>Setup karein — secret key aur plugins select karein</strong></a>
+    </p></div>';
 });
