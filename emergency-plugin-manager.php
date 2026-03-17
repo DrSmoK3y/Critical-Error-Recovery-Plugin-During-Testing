@@ -196,9 +196,6 @@ function epm_admin_page() {
     $saved    = isset( $_GET['saved'] );
     $err      = $_GET['err'] ?? '';
     $gen_url  = $secret ? home_url( '/?epm=' . $secret ) : '';
-
-    // Active plugins excluding this plugin
-    $active_others = array_filter( $active, fn($p) => $p !== $this_p );
     ?>
     <style>
     #epm-wrap *{box-sizing:border-box;}
@@ -246,6 +243,10 @@ function epm_admin_page() {
     .selected-preview{background:#0f0f1a;border-radius:8px;padding:12px 14px;
                       font-size:12px;color:#64748b;margin-top:10px;}
     .selected-preview span{color:#a78bfa;}
+    .st-badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;
+              white-space:nowrap;flex-shrink:0;}
+    .st-on {background:#052e16;color:#4ade80;border:1px solid #166534;}
+    .st-off{background:#1e1e30;color:#64748b;border:1px solid #2d2d44;}
     </style>
 
     <div id="epm-wrap">
@@ -274,16 +275,14 @@ function epm_admin_page() {
                autocomplete="off">
     </div>
 
-    <!-- PLUGIN SELECTION -->
+    <!-- PLUGIN SELECTION — ALL PLUGINS -->
     <div class="epm-card">
-        <h2>🔴 Plugins Select Karein
-            <span class="badge" id="sel-count">
-                <?php echo count($selected); ?> selected
-            </span>
+        <h2>📋 Plugins Select Karein
+            <span class="badge" id="sel-count"><?php echo count($selected); ?> selected</span>
         </h2>
         <p class="hint">
-            Yeh plugins us waqt deactivate honge jab aap emergency URL kholein.
-            Sirf active plugins dikh rahe hain.
+            Sare installed plugins — active aur inactive dono dikh rahe hain.
+            Jo select karein ge wo URL kholne par <strong style="color:#f87171;">deactivate</strong> ho jaenge.
         </p>
 
         <div class="sel-bar">
@@ -292,32 +291,46 @@ function epm_admin_page() {
         </div>
 
         <div class="plugin-grid" id="pgrid">
-        <?php if (empty($active_others)): ?>
-            <p style="color:#64748b;font-size:13px;">Koi active plugin nahi mila.</p>
-        <?php else: ?>
-            <?php foreach ($active_others as $pfile):
-                $info = $all[$pfile] ?? ['Name' => $pfile, 'Version' => ''];
-                $is_checked = in_array($pfile, $selected);
-            ?>
-            <label class="pi-row <?php echo $is_checked ? 'checked' : ''; ?>"
-                   onclick="updateRow(this)">
-                <input type="checkbox" name="selected_plugins[]"
-                       value="<?php echo esc_attr($pfile); ?>"
-                       <?php checked($is_checked); ?>
-                       onchange="updateCount()">
-                <div>
-                    <div class="pi-name"><?php echo esc_html($info['Name']); ?>
-                        <?php if(!empty($info['Version'])): ?>
-                        <span style="color:#64748b;font-weight:400;font-size:11px;">
-                            v<?php echo esc_html($info['Version']); ?>
-                        </span>
-                        <?php endif; ?>
-                    </div>
-                    <div class="pi-slug"><?php echo esc_html($pfile); ?></div>
+        <?php
+        // Build list: active upar, inactive neeche
+        $all_sorted = [];
+        foreach ( $all as $pfile => $info ) {
+            if ( $pfile === $this_p ) continue;
+            $all_sorted[] = [
+                'file'   => $pfile,
+                'info'   => $info,
+                'active' => in_array( $pfile, $active ),
+            ];
+        }
+        usort( $all_sorted, fn($a,$b) => $b['active'] - $a['active'] );
+
+        foreach ( $all_sorted as $row ):
+            $pfile      = $row['file'];
+            $info       = $row['info'];
+            $is_active  = $row['active'];
+            $is_checked = in_array( $pfile, $selected );
+        ?>
+        <label class="pi-row <?php echo $is_checked ? 'checked' : ''; ?>" onclick="updateRow(this)">
+            <input type="checkbox" name="selected_plugins[]"
+                   value="<?php echo esc_attr($pfile); ?>"
+                   <?php checked($is_checked); ?>
+                   onchange="updateCount()">
+            <div style="flex:1;">
+                <div class="pi-name">
+                    <?php echo esc_html($info['Name']); ?>
+                    <?php if(!empty($info['Version'])): ?>
+                    <span style="color:#64748b;font-weight:400;font-size:11px;">
+                        v<?php echo esc_html($info['Version']); ?>
+                    </span>
+                    <?php endif; ?>
                 </div>
-            </label>
-            <?php endforeach; ?>
-        <?php endif; ?>
+                <div class="pi-slug"><?php echo esc_html($pfile); ?></div>
+            </div>
+            <span class="st-badge <?php echo $is_active ? 'st-on' : 'st-off'; ?>">
+                <?php echo $is_active ? '● Active' : '○ Inactive'; ?>
+            </span>
+        </label>
+        <?php endforeach; ?>
         </div>
 
         <button type="submit" class="btn-save">💾 Save Karein &amp; URL Banao</button>
