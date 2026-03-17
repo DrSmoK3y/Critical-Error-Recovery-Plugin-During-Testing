@@ -1,0 +1,3 @@
+ ⚠ This plugin is only for test sites, don't use it on live sites. ⚠
+
+ Deactivate or activate any plugin outside of WordPress (no login required)...
